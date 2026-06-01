@@ -3,60 +3,57 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
-
-use Illuminate\Support\Facades\Http;
+use App\Jobs\ProcessDatabaseRelay;
+use Illuminate\Support\Facades\Log;
 
 class PayloadController extends Controller
 {
     public function relay(Request $request)
     {
         $validated = $request->validate([
-            'table' => ['required', 'string', 'min:1'],
-            'primaryKey' => ['required', 'string', 'min:1'],
-            'records' => ['required', 'array'],
+            'table' => ['required', 'string', 'min:1', 'max:255'],
+            'primaryKey' => ['required', 'string', 'min:1', 'max:255'],
+            'records' => ['required', 'array', 'min:1'],
+            'records.*' => ['required', 'array'],
         ]);
 
         $table = $validated['table'];
         $primaryKey = $validated['primaryKey'];
         $records = $validated['records'];
 
-        $payloadToForward = [
+        Log::info('Relay request received', [
             'table' => $table,
             'primaryKey' => $primaryKey,
-            'records' => $records,
-            // preserve any extra fields if the external sender includes them
-            'meta' => $request->except(['table', 'primaryKey', 'records']),
-        ];
-
-        $backofficeUrl = rtrim(config('services.backoffice.url', ''), '/');
-        if ($backofficeUrl === '') {
-            return response()->json([
-                'message' => 'Back-office destination URL is not configured',
-            ], 500);
-        }
-
-        $token = config('services.backoffice.token');
+            'records_count' => count($records),
+        ]);
 
         try {
-            $http = Http::timeout(30)->acceptJson();
-            if (filled($token)) {
-                $http = $http->withToken($token);
-            }
+            // Dispatch job to queue
+            ProcessDatabaseRelay::dispatch($table, $primaryKey, $records);
 
-            $response = $http->post($backofficeUrl . '/api/relay', $payloadToForward);
+            Log::info('Job dispatched successfully', [
+                'table' => $table,
+                'records_count' => count($records),
+            ]);
 
             return response()->json([
-                'message' => 'Relayed to back-office',
-                'backoffice' => [
-                    'status' => $response->status(),
-                    'body' => $response->json() ?? $response->body(),
-                ],
-            ], $response->status());
+                'message' => 'Relay job queued successfully',
+                'table' => $table,
+                'records_count' => count($records),
+                'status' => 'queued',
+            ], 202);
+
         } catch (\Throwable $e) {
-            return response()->json([
-                'message' => 'Failed to relay to back-office',
+            Log::error('Failed to dispatch relay job', [
+                'table' => $table,
                 'error' => $e->getMessage(),
-            ], 502);
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to queue relay job',
+                'error' => $e->getMessage(),
+            ], 500);
         }
     }
 }
