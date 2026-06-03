@@ -25,6 +25,11 @@ class PayloadController extends Controller
             'table' => $table,
             'primaryKey' => $primaryKey,
             'records_count' => count($records),
+            'payload' => [
+                'table' => $table,
+                'primaryKey' => $primaryKey,
+                'records' => $records,
+            ],
         ]);
 
         try {
