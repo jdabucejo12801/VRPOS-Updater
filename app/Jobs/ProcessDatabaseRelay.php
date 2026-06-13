@@ -133,6 +133,39 @@ class ProcessDatabaseRelay implements ShouldQueue
         return '[' . str_replace(']', ']]', $identifier) . ']';
     }
 
+    /**
+     * Split a potentially schema-qualified table name into [schema, object].
+     *
+     * If no schema is present, defaults to 'dbo'.
+     */
+    protected function parseSchemaAndObject(string $table): array
+    {
+        $table = trim($table);
+
+        if (str_contains($table, '.')) {
+            [$schema, $object] = explode('.', $table, 2);
+            $schema = trim($schema);
+            $object = trim($object);
+
+            if ($schema === '' || $object === '') {
+                return ['schema' => 'dbo', 'object' => $table];
+            }
+
+            return ['schema' => $schema, 'object' => $object];
+        }
+
+        return ['schema' => 'dbo', 'object' => $table];
+    }
+
+    /**
+     * @param array<string, mixed> $values
+     */
+    protected function quoteSqlServerObjectLiteral(array $schemaAndObject): string
+    {
+        return $this->quoteSqlServerIdentifier($schemaAndObject['schema']) . '.' . $this->quoteSqlServerIdentifier($schemaAndObject['object']);
+    }
+
+
     public function handle(): void
     {
         Log::info('ProcessDatabaseRelay job started', [
@@ -181,10 +214,12 @@ class ProcessDatabaseRelay implements ShouldQueue
 
                 // Check if exists
                 $query = DB::connection('sqlsrv')->table($this->table);
+
                 foreach ($pkWhere as $col => $val) {
-                    $query->where($col, $val);
+                    $query->where($this->quoteSqlServerIdentifier($col), $val);
                 }
                 $exists = $query->exists();
+
 
                 $updateData = $schemaAwareRecord;
                 foreach ($this->primaryKeyColumns as $pkCol) {
@@ -222,13 +257,16 @@ class ProcessDatabaseRelay implements ShouldQueue
 
                     // SQL Server: only enable IDENTITY_INSERT when the target table actually has an IDENTITY column.
                     // If we blindly SET IDENTITY_INSERT on a non-identity table, SQL Server throws and the job will never succeed.
+                    $schemaAndObject = $this->parseSchemaAndObject($this->table);
+
                     $hasIdentity = (bool) $conn->selectOne(
                         "SELECT 1 as hasIdentity
                          FROM sys.columns c
-                         WHERE c.object_id = OBJECT_ID(:tableName)
+                         WHERE c.object_id = OBJECT_ID(QUOTENAME(:schema) + '.' + QUOTENAME(:object))
                            AND c.is_identity = 1",
-                        ['tableName' => $this->table]
+                        ['schema' => $schemaAndObject['schema'], 'object' => $schemaAndObject['object']]
                     );
+
 
                     if ($hasIdentity) {
                         // Single execution so IDENTITY_INSERT ON/OFF are in the same context.
