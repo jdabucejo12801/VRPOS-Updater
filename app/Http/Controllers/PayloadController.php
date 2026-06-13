@@ -27,6 +27,7 @@ class PayloadController extends Controller
             Log::info('Relay job queued', [
                 'table' => $validated['table'],
                 'records_count' => count($validated['records']),
+                'payload' => $validated['records']
             ]);
 
             return response()->json([
