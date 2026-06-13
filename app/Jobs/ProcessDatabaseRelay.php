@@ -9,6 +9,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 class ProcessDatabaseRelay implements ShouldQueue
 {
@@ -55,6 +56,82 @@ class ProcessDatabaseRelay implements ShouldQueue
         return $cols;
     }
 
+    protected function getValidTableColumns(): array
+    {
+        $connection = DB::connection('sqlsrv');
+
+        try {
+            $columns = Schema::connection('sqlsrv')->getColumnListing($this->table);
+        } catch (\Throwable $exception) {
+            Log::warning('Falling back to INFORMATION_SCHEMA for column listing', [
+                'table' => $this->table,
+                'error' => $exception->getMessage(),
+            ]);
+            $columns = [];
+        }
+
+        if (empty($columns)) {
+            $results = $connection->select(
+                "SELECT COLUMN_NAME
+                 FROM INFORMATION_SCHEMA.COLUMNS
+                 WHERE TABLE_NAME = :tableName
+                 ORDER BY ORDINAL_POSITION",
+                ['tableName' => $this->table]
+            );
+
+            $columns = array_map(static fn ($column) => $column->COLUMN_NAME, $results);
+        }
+
+        $normalizedColumns = [];
+        foreach ($columns as $column) {
+            $value = (string) $column;
+            if ($value !== '') {
+                $normalizedColumns[] = $value;
+            }
+        }
+
+        return array_values(array_unique($normalizedColumns));
+    }
+
+    protected function filterRecordToSchemaColumns(array $record, array $validColumns): array
+    {
+        if (empty($record)) {
+            return [];
+        }
+
+        $validColumnsByName = [];
+        foreach ($validColumns as $column) {
+            $validColumnsByName[strtolower((string) $column)] = (string) $column;
+        }
+
+        $filteredRecord = [];
+        foreach ($record as $column => $value) {
+            $normalizedColumn = strtolower((string) $column);
+            if (array_key_exists($normalizedColumn, $validColumnsByName)) {
+                $filteredRecord[$validColumnsByName[$normalizedColumn]] = $value;
+            }
+        }
+
+        return $filteredRecord;
+    }
+
+    protected function resolveColumnName(string $columnName, array $validColumns): ?string
+    {
+        $normalizedColumnName = strtolower($columnName);
+
+        foreach ($validColumns as $validColumn) {
+            if (strtolower((string) $validColumn) === $normalizedColumnName) {
+                return (string) $validColumn;
+            }
+        }
+
+        return null;
+    }
+
+    protected function quoteSqlServerIdentifier(string $identifier): string
+    {
+        return '[' . str_replace(']', ']]', $identifier) . ']';
+    }
 
     public function handle(): void
     {
@@ -73,19 +150,33 @@ class ProcessDatabaseRelay implements ShouldQueue
             $test = DB::connection('sqlsrv')->select('SELECT DB_NAME() as dbname');
             Log::info('Connected to SQL Server', ['database' => $test[0]->dbname]);
 
+            $validColumns = $this->getValidTableColumns();
+            Log::info('Resolved target schema columns', [
+                'table' => $this->table,
+                'columns' => $validColumns,
+            ]);
+
             Log::info('Using composite primary key columns', [
                 'primaryKey' => $this->primaryKey,
                 'primaryKeyColumns' => $this->primaryKeyColumns,
             ]);
 
             foreach ($this->records as $index => $record) {
+                $schemaAwareRecord = $this->filterRecordToSchemaColumns($record, $validColumns);
+
                 // WHERE clause based on all primary key columns
                 $pkWhere = [];
                 foreach ($this->primaryKeyColumns as $pkCol) {
-                    if (!array_key_exists($pkCol, $record)) {
+                    $resolvedPkColumn = $this->resolveColumnName($pkCol, $validColumns);
+                    if ($resolvedPkColumn === null) {
+                        throw new \InvalidArgumentException("Destination table {$this->table} does not contain primary key column: {$pkCol}");
+                    }
+
+                    if (!array_key_exists($resolvedPkColumn, $schemaAwareRecord)) {
                         throw new \InvalidArgumentException("Record at index {$index} is missing primary key column: {$pkCol}");
                     }
-                    $pkWhere[$pkCol] = $record[$pkCol];
+
+                    $pkWhere[$resolvedPkColumn] = $schemaAwareRecord[$resolvedPkColumn];
                 }
 
                 // Check if exists
@@ -95,15 +186,16 @@ class ProcessDatabaseRelay implements ShouldQueue
                 }
                 $exists = $query->exists();
 
-                // Build schema-agnostic column sets from record keys
-                $columns = array_keys($record);
-                $updateData = $record;
+                $updateData = $schemaAwareRecord;
                 foreach ($this->primaryKeyColumns as $pkCol) {
-                    unset($updateData[$pkCol]);
+                    $resolvedPkColumn = $this->resolveColumnName($pkCol, $validColumns);
+                    if ($resolvedPkColumn !== null) {
+                        unset($updateData[$resolvedPkColumn]);
+                    }
                 }
 
                 if ($exists) {
-                    // UPDATE using all provided columns except PK(s)
+                    // UPDATE using only schema-supported columns except PK(s)
                     if (!empty($updateData)) {
                         $updateQuery = DB::connection('sqlsrv')->table($this->table);
                         foreach ($pkWhere as $col => $val) {
@@ -115,9 +207,15 @@ class ProcessDatabaseRelay implements ShouldQueue
                     $updated++;
                     Log::info('Record updated', ['pkWhere' => $pkWhere]);
                 } else {
-                    // INSERT
-                    $values = array_values($record);
-                    $columnList = implode(', ', array_map(fn ($col) => "[{$col}]", $columns));
+                    // INSERT using only schema-supported columns
+                    $columns = array_keys($schemaAwareRecord);
+                    $values = array_values($schemaAwareRecord);
+
+                    if (empty($columns)) {
+                        throw new \InvalidArgumentException("Record at index {$index} contains no schema-supported columns for table {$this->table}");
+                    }
+
+                    $columnList = implode(', ', array_map(fn ($col) => $this->quoteSqlServerIdentifier($col), $columns));
                     $placeholders = implode(', ', array_fill(0, count($values), '?'));
 
                     $conn = DB::connection('sqlsrv');
@@ -134,18 +232,17 @@ class ProcessDatabaseRelay implements ShouldQueue
 
                     if ($hasIdentity) {
                         // Single execution so IDENTITY_INSERT ON/OFF are in the same context.
-                        $sql = "SET IDENTITY_INSERT [{$this->table}] ON; " .
-                            "INSERT INTO [{$this->table}] ({$columnList}) VALUES ({$placeholders}); " .
-                            "SET IDENTITY_INSERT [{$this->table}] OFF;";
+                        $sql = "SET IDENTITY_INSERT {$this->quoteSqlServerIdentifier($this->table)} ON; " .
+                            "INSERT INTO {$this->quoteSqlServerIdentifier($this->table)} ({$columnList}) VALUES ({$placeholders}); " .
+                            "SET IDENTITY_INSERT {$this->quoteSqlServerIdentifier($this->table)} OFF;";
                         $conn->statement($sql, $values);
                     } else {
-                        $sql = "INSERT INTO [{$this->table}] ({$columnList}) VALUES ({$placeholders});";
+                        $sql = "INSERT INTO {$this->quoteSqlServerIdentifier($this->table)} ({$columnList}) VALUES ({$placeholders});";
                         $conn->statement($sql, $values);
                     }
 
                     $inserted++;
                     Log::info('Record inserted', ['pkWhere' => $pkWhere, 'hasIdentity' => $hasIdentity]);
-
                 }
             }
 
@@ -153,9 +250,7 @@ class ProcessDatabaseRelay implements ShouldQueue
                 'inserted' => $inserted,
                 'updated' => $updated,
             ]);
-
         } catch (\Throwable $e) {
-
             Log::error('Job failed', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
@@ -175,8 +270,4 @@ class ProcessDatabaseRelay implements ShouldQueue
         ]);
     }
 }
-
-
-
-
 
