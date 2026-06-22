@@ -17,22 +17,6 @@ class PayloadController extends Controller
             'primaryKey' => ['nullable', 'string'],
         ]);
 
-        $allowedTables = config('relay.allowed_tables', []);
-        $normalizedAllowedTables = array_map(
-            static fn (string $table): string => strtolower(trim($table)),
-            array_filter($allowedTables, static fn ($table): bool => is_string($table) && trim($table) !== '')
-        );
-
-        if (!in_array(strtolower(trim($validated['table'])), $normalizedAllowedTables, true)) {
-            Log::warning('Rejected relay request for non-allowlisted table', [
-                'table' => $validated['table'],
-            ]);
-
-            return response()->json([
-                'message' => 'Table not permitted',
-            ], 403);
-        }
-
         try {
             ProcessDatabaseRelay::dispatch(
                 $validated['table'],
