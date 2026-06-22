@@ -15,6 +15,7 @@ class ProcessDatabaseRelay implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    public $tries = 1;
     public $timeout = 120;
     public $backoff = [10, 30, 60];
 
@@ -26,37 +27,13 @@ class ProcessDatabaseRelay implements ShouldQueue
      */
     protected ?string $primaryKey;
 
-    /** @var array<int, string> */
-    protected array $primaryKeyColumns;
-
     protected array $records;
 
     public function __construct(string $table, ?string $primaryKey, array $records)
     {
         $this->table = $table;
         $this->primaryKey = $primaryKey;
-        $this->primaryKeyColumns = $this->parsePrimaryKeyColumns($primaryKey);
         $this->records = $records;
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    protected function parsePrimaryKeyColumns(?string $primaryKey): array
-    {
-        if ($primaryKey === null || trim($primaryKey) === '') {
-            return [];
-        }
-
-        // Support comma-separated composite keys.
-        $cols = array_map('trim', explode(',', $primaryKey));
-        $cols = array_values(array_filter($cols, fn ($c) => $c !== ''));
-
-        if (count($cols) < 1) {
-            throw new \InvalidArgumentException('primaryKey must contain at least one column name');
-        }
-
-        return $cols;
     }
 
     protected function getValidTableColumns(): array
@@ -123,24 +100,6 @@ class ProcessDatabaseRelay implements ShouldQueue
         return $filteredRecord;
     }
 
-    protected function resolveColumnName(string $columnName, array $validColumns): ?string
-    {
-        $normalizedColumnName = strtolower($columnName);
-
-        foreach ($validColumns as $validColumn) {
-            if (strtolower((string) $validColumn) === $normalizedColumnName) {
-                return (string) $validColumn;
-            }
-        }
-
-        return null;
-    }
-
-    public function tries(): int
-    {
-        return empty($this->primaryKeyColumns) ? 1 : 3;
-    }
-
     protected function quoteSqlServerIdentifier(string $identifier): string
     {
         return '[' . str_replace(']', ']]', $identifier) . ']';
@@ -193,7 +152,6 @@ class ProcessDatabaseRelay implements ShouldQueue
         Log::info('ProcessDatabaseRelay job started', [
             'table' => $this->table,
             'primaryKey' => $this->primaryKey,
-            'primaryKeyColumns' => $this->primaryKeyColumns,
             'records_count' => count($this->records),
         ]);
 
@@ -229,18 +187,6 @@ class ProcessDatabaseRelay implements ShouldQueue
                     throw new \InvalidArgumentException("Record at index {$index} contains no schema-supported columns for table {$this->table}");
                 }
 
-                foreach ($this->primaryKeyColumns as $primaryKeyColumn) {
-                    $resolvedPrimaryKeyColumn = $this->resolveColumnName($primaryKeyColumn, $validColumns);
-
-                    if ($resolvedPrimaryKeyColumn === null) {
-                        throw new \InvalidArgumentException("Destination table {$this->table} does not contain primary key column: {$primaryKeyColumn}");
-                    }
-
-                    if (!array_key_exists($resolvedPrimaryKeyColumn, $schemaAwareRecord)) {
-                        throw new \InvalidArgumentException("Record at index {$index} is missing primary key column: {$primaryKeyColumn}");
-                    }
-                }
-
                 $signature = implode('|', array_keys($schemaAwareRecord));
                 $groups[$signature][] = $schemaAwareRecord;
             }
@@ -259,7 +205,7 @@ class ProcessDatabaseRelay implements ShouldQueue
             $quotedTable = $this->quoteSqlServerObjectLiteral($schemaAndObject);
             $totalInserted = 0;
 
-            $conn->transaction(function () use ($conn, $groups, $hasIdentity, $quotedTable, $validColumns, &$totalInserted) {
+            $conn->transaction(function () use ($conn, $groups, $hasIdentity, $quotedTable, &$totalInserted) {
                 // IDENTITY_INSERT is session-scoped; toggle once per transaction rather than per row.
                 if ($hasIdentity) {
                     $conn->statement("SET IDENTITY_INSERT {$quotedTable} ON");
@@ -285,12 +231,7 @@ class ProcessDatabaseRelay implements ShouldQueue
                                 }
                             }
 
-                            if (!empty($this->primaryKeyColumns)) {
-                                $sql = $this->buildMergeStatement($quotedTable, $columns, $validColumns, $valuesClause);
-                            } else {
-                                $sql = "INSERT INTO {$quotedTable} ({$columnList}) VALUES {$valuesClause}";
-                            }
-
+                            $sql = "INSERT INTO {$quotedTable} ({$columnList}) VALUES {$valuesClause}";
                             $conn->statement($sql, $bindings);
                             $totalInserted += count($chunk);
                         }
@@ -327,60 +268,5 @@ class ProcessDatabaseRelay implements ShouldQueue
             'attempts' => $this->attempts(),
             'error' => $exception->getMessage(),
         ]);
-    }
-
-    /**
-     * @param array<int, string> $columns
-     * @param array<int, string> $validColumns
-     */
-    protected function buildMergeStatement(string $quotedTable, array $columns, array $validColumns, string $valuesClause): string
-    {
-        $quotedSourceColumns = implode(', ', array_map(
-            fn ($column) => $this->quoteSqlServerIdentifier($column),
-            $columns
-        ));
-
-        $resolvedPrimaryKeys = array_map(function (string $primaryKeyColumn) use ($validColumns): string {
-            $resolvedColumn = $this->resolveColumnName($primaryKeyColumn, $validColumns);
-
-            if ($resolvedColumn === null) {
-                throw new \InvalidArgumentException("Destination table {$this->table} does not contain primary key column: {$primaryKeyColumn}");
-            }
-
-            return $resolvedColumn;
-        }, $this->primaryKeyColumns);
-
-        $onClause = implode(' AND ', array_map(
-            fn ($column) => 'target.' . $this->quoteSqlServerIdentifier($column) . ' = source.' . $this->quoteSqlServerIdentifier($column),
-            $resolvedPrimaryKeys
-        ));
-
-        $updateColumns = array_values(array_filter(
-            $columns,
-            fn ($column) => !in_array(strtolower($column), array_map('strtolower', $resolvedPrimaryKeys), true)
-        ));
-
-        $insertSourceColumnList = implode(', ', array_map(
-            fn ($column) => 'source.' . $this->quoteSqlServerIdentifier($column),
-            $columns
-        ));
-
-        $sql = "MERGE INTO {$quotedTable} AS target "
-            . "USING (VALUES {$valuesClause}) AS source ({$quotedSourceColumns}) "
-            . "ON {$onClause} ";
-
-        if (!empty($updateColumns)) {
-            $updateClause = implode(', ', array_map(
-                fn ($column) => 'target.' . $this->quoteSqlServerIdentifier($column)
-                    . ' = source.' . $this->quoteSqlServerIdentifier($column),
-                $updateColumns
-            ));
-
-            $sql .= "WHEN MATCHED THEN UPDATE SET {$updateClause} ";
-        }
-
-        $sql .= "WHEN NOT MATCHED THEN INSERT ({$quotedSourceColumns}) VALUES ({$insertSourceColumnList});";
-
-        return $sql;
     }
 }
