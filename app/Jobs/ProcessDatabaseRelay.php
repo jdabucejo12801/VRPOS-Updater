@@ -15,7 +15,7 @@ class ProcessDatabaseRelay implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public $tries = 1;
+    public $tries = 4;
     public $timeout = 120;
     public $backoff = [10, 30, 60];
 
@@ -29,11 +29,14 @@ class ProcessDatabaseRelay implements ShouldQueue
 
     protected array $records;
 
-    public function __construct(string $table, ?string $primaryKey, array $records)
+    protected string $relayId;
+
+    public function __construct(string $table, ?string $primaryKey, array $records, ?string $relayId = null)
     {
         $this->table = $table;
         $this->primaryKey = $primaryKey;
         $this->records = $records;
+        $this->relayId = $relayId ?? (string) str()->uuid();
     }
 
     protected function getValidTableColumns(): array
@@ -142,17 +145,32 @@ class ProcessDatabaseRelay implements ShouldQueue
     {
         if (empty($this->records)) {
             Log::warning('ProcessDatabaseRelay called with empty records', [
+                'relay_id' => $this->relayId,
                 'table' => $this->table,
                 'primaryKey' => $this->primaryKey,
+            ]);
+
+            Log::channel('relay')->warning('Relay job received empty records', [
+                'relay_id' => $this->relayId,
+                'table' => $this->table,
+                'status' => 'empty_records',
             ]);
 
             return;
         }
 
         Log::info('ProcessDatabaseRelay job started', [
+            'relay_id' => $this->relayId,
             'table' => $this->table,
             'primaryKey' => $this->primaryKey,
             'records_count' => count($this->records),
+        ]);
+
+        Log::channel('relay')->info('Relay job started', [
+            'relay_id' => $this->relayId,
+            'table' => $this->table,
+            'records_count' => count($this->records),
+            'status' => 'processing',
         ]);
 
         $conn = DB::connection('sqlsrv');
@@ -244,17 +262,36 @@ class ProcessDatabaseRelay implements ShouldQueue
             });
 
             Log::info('Relay completed successfully', [
+                'relay_id' => $this->relayId,
                 'table' => $this->table,
                 'inserted' => $totalInserted,
                 'hasIdentity' => $hasIdentity,
             ]);
+
+            Log::channel('relay')->info('Relay completed successfully', [
+                'relay_id' => $this->relayId,
+                'table' => $this->table,
+                'records_count' => count($this->records),
+                'inserted' => $totalInserted,
+                'status' => 'success',
+            ]);
         } catch (\Throwable $e) {
             Log::error('Bulk insert relay failed', [
+                'relay_id' => $this->relayId,
                 'table' => $this->table,
                 'primaryKey' => $this->primaryKey,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
+
+            Log::channel('relay')->error('Relay processing failed', [
+                'relay_id' => $this->relayId,
+                'table' => $this->table,
+                'records_count' => count($this->records),
+                'error' => $e->getMessage(),
+                'status' => 'failed',
+            ]);
+
             throw $e;
         }
     }
@@ -262,11 +299,21 @@ class ProcessDatabaseRelay implements ShouldQueue
     public function failed(\Throwable $exception): void
     {
         Log::critical('ProcessDatabaseRelay job failed permanently', [
+            'relay_id' => $this->relayId,
             'table' => $this->table,
             'primaryKey' => $this->primaryKey,
             'records_count' => count($this->records),
             'attempts' => $this->attempts(),
             'error' => $exception->getMessage(),
+        ]);
+
+        Log::channel('relay')->critical('Relay job failed permanently', [
+            'relay_id' => $this->relayId,
+            'table' => $this->table,
+            'records_count' => count($this->records),
+            'attempts' => $this->attempts(),
+            'error' => $exception->getMessage(),
+            'status' => 'failed_permanently',
         ]);
     }
 }

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Jobs\ProcessDatabaseRelay;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class PayloadController extends Controller
 {
@@ -18,20 +19,32 @@ class PayloadController extends Controller
         ]);
 
         try {
+            $relayId = (string) Str::uuid();
+
             ProcessDatabaseRelay::dispatch(
                 $validated['table'],
                 $validated['primaryKey'] ?? null,
-                $validated['records']
+                $validated['records'],
+                $relayId
             );
 
             Log::info('Relay job queued', [
+                'relay_id' => $relayId,
                 'table' => $validated['table'],
                 'records_count' => count($validated['records']),
                 'payload' => $validated['records']
             ]);
 
+            Log::channel('relay')->info('Relay job queued', [
+                'relay_id' => $relayId,
+                'table' => $validated['table'],
+                'records_count' => count($validated['records']),
+                'status' => 'queued',
+            ]);
+
             return response()->json([
                 'message' => 'Relay job queued successfully',
+                'relay_id' => $relayId,
                 'table' => $validated['table'],
                 'records_count' => count($validated['records']),
                 'status' => 'queued',
@@ -42,6 +55,13 @@ class PayloadController extends Controller
             Log::error('Failed to queue relay job', [
                 'table' => $validated['table'],
                 'error' => $e->getMessage(),
+            ]);
+
+            Log::channel('relay')->error('Relay job queueing failed', [
+                'table' => $validated['table'],
+                'records_count' => count($validated['records']),
+                'error' => $e->getMessage(),
+                'status' => 'queue_failed',
             ]);
 
             return response()->json([
