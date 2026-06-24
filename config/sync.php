@@ -41,7 +41,7 @@ return [
         'Transaction_History_PWD' => ['primaryKey'=> ['ID','Transaction_ID'],'function' => 'insert'],
         'Transaction_History_SeniorCitizen' => ['primaryKey'=> ['ID','Transaction_ID'],'function' => 'insert'],
         'Transaction_History_SoloParent' =>['primaryKey'=> ['ID','Transaction_ID'],'function' => 'insert'],
-        'Business_Day' => ['primaryKey'=> ['PERIOD_ID','POS_ID'],'function' => 'insert'],
+        'Business_Day' => ['primaryKey'=> ['PERIOD_ID','POS_ID'],'function' => 'upsert'],
         'turnovercashiermophistory' => ['primaryKey'=> ['BRANCH_ID','OUTLETID','DATE','SHIFT','EMPNO','POSNUMBER','MOP_ID'],'function' => 'insert'],
         'Periods' => ['primaryKey'=> ['Period_ID','POS_ID','Branch_ID'],'function' => 'upsert'],
         'CashDraw_Denomination' => ['primaryKey'=> ['ID'],'function' => 'insert'],
