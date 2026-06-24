@@ -81,6 +81,27 @@ return [
             'replace_placeholders' => true,
         ],
 
+        'vrpos_queue_input' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/Input/vrpos-queue-payload.log'),
+            'level' => 'info',
+            'replace_placeholders' => true,
+        ],
+
+        'vrpos_queue_output' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/Output/vrpos-queue-worker.log'),
+            'level' => 'info',
+            'replace_placeholders' => true,
+        ],
+
+        'vrpos_queue_error' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/Error/vrpos-queue-error.log'),
+            'level' => 'error',
+            'replace_placeholders' => true,
+        ],
+
         'slack' => [
             'driver' => 'slack',
             'url' => env('LOG_SLACK_WEBHOOK_URL'),

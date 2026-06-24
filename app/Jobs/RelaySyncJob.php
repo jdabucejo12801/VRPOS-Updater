@@ -14,7 +14,7 @@ use Throwable;
 
 /**
  * Writes one relay batch (one table, many rows) to the remote "server"
- * database. Inserts only — existing rows are never updated. Runs on the queue
+ * database. Inserts only - existing rows are never updated. Runs on the queue
  * so the POS gets an immediate response, and is retried with backoff on
  * failure (e.g. the remote DB being temporarily unreachable).
  */
@@ -67,9 +67,12 @@ class RelaySyncJob implements ShouldQueue
 
         $connection = config('sync.connection', 'server');
         $db = DB::connection($connection);
+        $outputLogger = Log::channel('vrpos_queue_output');
+        $errorLogger = Log::channel('vrpos_queue_error');
 
         $inserted = 0;
         $skipped = 0;
+        $skippedRows = [];
 
         try {
             // Insert-only, row by row. SQL Server does not support
@@ -82,31 +85,45 @@ class RelaySyncJob implements ShouldQueue
                     $db->table($this->table)->insert($row);
                     $inserted++;
                 } catch (UniqueConstraintViolationException $e) {
-                    // Row already present — expected on retries. Skip it.
+                    // Row already present - expected on retries. Skip it.
                     $skipped++;
+                    $skippedRows[] = $row;
                 }
             }
         } catch (Throwable $e) {
             // Any other error (connection lost, bad column, deadlock, etc.).
             // Log this attempt and rethrow so the queue retries with backoff.
-            Log::error('Relay batch attempt failed', [
+            $errorLogger->error('Relay batch attempt failed', [
+                'logged_at' => now()->toIso8601String(),
                 'table' => $this->table,
                 'connection' => $connection,
+                'queue' => $this->queue,
                 'attempt' => $this->attempts(),
                 'max_tries' => $this->tries(),
                 'rows' => count($this->rows),
                 'inserted_before_failure' => $inserted,
+                'skipped_before_failure' => $skipped,
+                'payload' => $this->rows,
+                'skipped_rows' => $skippedRows,
+                'exception' => get_class($e),
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             throw $e;
         }
 
-        Log::info('Relay batch written', [
+        $outputLogger->info('Relay batch written', [
+            'logged_at' => now()->toIso8601String(),
             'table' => $this->table,
+            'connection' => $connection,
+            'queue' => $this->queue,
+            'attempt' => $this->attempts(),
             'rows_received' => count($this->rows),
             'rows_inserted' => $inserted,
             'rows_skipped' => $skipped,
+            'payload' => $this->rows,
+            'skipped_rows' => $skippedRows,
         ]);
     }
 
@@ -115,10 +132,15 @@ class RelaySyncJob implements ShouldQueue
      */
     public function failed(Throwable $e): void
     {
-        Log::error('Relay batch permanently failed', [
+        Log::channel('vrpos_queue_error')->error('Relay batch permanently failed', [
+            'logged_at' => now()->toIso8601String(),
             'table' => $this->table,
             'rows' => count($this->rows),
+            'queue' => $this->queue,
+            'payload' => $this->rows,
+            'exception' => get_class($e),
             'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString(),
         ]);
     }
 }
