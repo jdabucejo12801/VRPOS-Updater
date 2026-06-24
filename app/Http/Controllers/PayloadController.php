@@ -22,7 +22,7 @@ class PayloadController extends Controller
      *     "payload": [ { ...row... }, { ...row... } ]
      *   }
      */
-    public function relay(Request $request): JsonResponse
+    public function handleRelay(Request $request): JsonResponse
     {
         $data = $request->validate([
             'table' => 'required|string',

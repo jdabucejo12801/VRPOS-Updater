@@ -33,8 +33,8 @@ return [
     'tables' => [
         'Transaction_Items' => ['Transaction_ID', 'POS_ID', 'Branch_ID', 'Item_Number'],
         'Transactions' => ['Transaction_ID', 'POS_ID', 'Branch_ID'],  
-        'Periods' => ['Period_ID','POS_ID','Branch_ID']  
-        
+        'Periods' => ['Period_ID','POS_ID','Branch_ID']
+                
     ],
 
     /*
