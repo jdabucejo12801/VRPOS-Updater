@@ -31,33 +31,33 @@ return [
     */
 
     'tables' => [
-        'Transaction_Items' => ['Transaction_ID', 'POS_ID', 'Branch_ID', 'Item_Number'],
-        'Transactions' => ['Transaction_ID', 'POS_ID', 'Branch_ID'],  
-        'Transaction_Details' => ['Branch_ID','Transaction_ID','POS_ID'],
-        'Transaction_History_MedalofValor' => ['ID','Transaction_ID'],
-        'Transaction_History_NationalAthlete' => ['ID','Transaction_ID'],
-        'Transaction_History_PWD' => ['ID','Transaction_ID'],
-        'Transaction_History_SeniorCitizen' => ['ID','Transaction_ID'],
-        'Transaction_History_SoloParent' => ['ID','Transaction_ID'],
-        'Business_Day' => ['PERIOD_ID','POS_ID'],
-        'turnovercashiermophistory' => ['BRANCH_ID','OUTLETID','DATE','SHIFT','EMPNO','POSNUMBER','MOP_ID'],
-        'Periods' => ['Period_ID','POS_ID','Branch_ID'],
-        'CashDraw_Denomination' => ['ID'],
-        'Cashier_History' => ['Cashier_ID','Period_ID','POS_ID'],
-        'DailySummary' => ['STATIONCODE','DATE'],
-        'Days' => ['DATE'],
-        'Departments' => ['Department_ID'],
-        'DiscountSummary' => ['BRANCHID','OUTLETID','POSNUMBER','DATE','EMPNO','SHIFT','DISCOUNTID','RESETID'],
-        'Eod_Reports' => ['POS_ID','PERIOD_ID'],
-        'OutletStockStatusFilter' => ['BRANCHID'],
-        'Finalisation_History' => ['MOP_ID','PERIOD_ID'],
-        'stockcrd' => ['BRANCHID','STOCKCRDID','OUTLETID','POSNUMBER'],
-        'Synctable' => ['TABLENAME'],
-       
-        
     
 
+        'Transaction_Items' => ['primaryKey'=> ['Transaction_ID', 'POS_ID', 'Branch_ID', 'Item_Number'],'function' => 'insert'],
+        'Transactions' => ['primaryKey'=> ['Transaction_ID', 'POS_ID', 'Branch_ID'],'function' => 'insert'],  
+        'Transaction_Details' => ['primaryKey'=> ['Branch_ID','Transaction_ID','POS_ID'],'function' => 'insert'],
+        'Transaction_History_MedalofValor' => ['primaryKey'=> ['ID','Transaction_ID'],'function' => 'insert'],
+        'Transaction_History_NationalAthlete' =>['primaryKey'=>  ['ID','Transaction_ID'],'function' => 'insert'],
+        'Transaction_History_PWD' => ['primaryKey'=> ['ID','Transaction_ID'],'function' => 'insert'],
+        'Transaction_History_SeniorCitizen' => ['primaryKey'=> ['ID','Transaction_ID'],'function' => 'insert'],
+        'Transaction_History_SoloParent' =>['primaryKey'=> ['ID','Transaction_ID'],'function' => 'insert'],
+        'Business_Day' => ['primaryKey'=> ['PERIOD_ID','POS_ID'],'function' => 'insert'],
+        'turnovercashiermophistory' => ['primaryKey'=> ['BRANCH_ID','OUTLETID','DATE','SHIFT','EMPNO','POSNUMBER','MOP_ID'],'function' => 'insert'],
+        'Periods' => ['primaryKey'=> ['Period_ID','POS_ID','Branch_ID'],'function' => 'upsert'],
+        'CashDraw_Denomination' => ['primaryKey'=> ['ID'],'function' => 'insert'],
+        'Cashier_History' =>['primaryKey'=>  ['Cashier_ID','Period_ID','POS_ID'],'function' => 'insert'],
+        'DailySummary' =>['primaryKey'=>  ['STATIONCODE','DATE'],'function' => 'insert'],
+        'Days' =>['primaryKey'=>  ['DATE'],'function' => 'insert'],
+        'Departments' =>['primaryKey'=>  ['Department_ID'],'function' => 'insert'],
+        'DiscountSummary' =>['primaryKey'=>  ['BRANCHID','OUTLETID','POSNUMBER','DATE','EMPNO','SHIFT','DISCOUNTID','RESETID'],'function' => 'insert'],
+        'Eod_Reports' => ['primaryKey'=> ['POS_ID','PERIOD_ID'],'function' => 'insert'],
+        'OutletStockStatusFilter' =>['primaryKey'=>  ['BRANCHID'],'function' => 'insert'],
+        'Finalisation_History' =>['primaryKey'=>  ['MOP_ID','PERIOD_ID'],'function' => 'insert'],
+        'stockcrd' =>['primaryKey'=>  ['BRANCHID','STOCKCRDID','OUTLETID','POSNUMBER'],'function' => 'insert'],
+        'Synctable' =>['primaryKey'=>  ['TABLENAME'],'function' => 'insert'],
+    
     ],
+
 
     /*
     |--------------------------------------------------------------------------

@@ -67,19 +67,25 @@ class RelaySyncJob implements ShouldQueue
 
         $connection = config('sync.connection', 'server');
         $db = DB::connection($connection);
+       
         $outputLogger = Log::channel('vrpos_queue_output');
         $errorLogger = Log::channel('vrpos_queue_error');
+        $settings = config("sync.tables.{$this->table}", []);
+        $strategy = $settings['function'] ?? 'insert';
+        $key = $settings['primaryKey'] ?? [];
 
         $inserted = 0;
+        $upserted = 0;
         $skipped = 0;
         $skippedRows = [];
 
         try {
-            // Insert-only, row by row. SQL Server does not support
-            // insertOrIgnore, so instead we insert each row and skip any whose
-            // primary/unique key already exists. This keeps the job idempotent:
-            // a retry that partially landed simply skips the rows already there
-            // instead of erroring or overwriting data already on the server.
+            if($strategy === 'upsert') {
+             $upserted = $db->table($this->table)->upsert($this->rows,$key);
+            }
+            
+
+            else {
             foreach ($this->rows as $row) {
                 try {
                     $db->table($this->table)->insert($row);
@@ -89,6 +95,7 @@ class RelaySyncJob implements ShouldQueue
                     $skipped++;
                     $skippedRows[] = $row;
                 }
+            }
             }
         } catch (Throwable $e) {
             // Any other error (connection lost, bad column, deadlock, etc.).

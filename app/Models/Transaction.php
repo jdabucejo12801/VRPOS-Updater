@@ -17,10 +17,8 @@ class Transaction extends Model
         'POS_ID',
         'Transaction_Number',
         'Transaction_Date',
-        '',
-        '',
-        '',
-    ]
+     
+    ];
 
 
 }
