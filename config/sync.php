@@ -33,8 +33,30 @@ return [
     'tables' => [
         'Transaction_Items' => ['Transaction_ID', 'POS_ID', 'Branch_ID', 'Item_Number'],
         'Transactions' => ['Transaction_ID', 'POS_ID', 'Branch_ID'],  
-        'Periods' => ['Period_ID','POS_ID','Branch_ID']
-                
+        'Transaction_Details' => ['Branch_ID','Transaction_ID','POS_ID'],
+        'Transaction_History_MedalofValor' => ['ID','Transaction_ID'],
+        'Transaction_History_NationalAthlete' => ['ID','Transaction_ID'],
+        'Transaction_History_PWD' => ['ID','Transaction_ID'],
+        'Transaction_History_SeniorCitizen' => ['ID','Transaction_ID'],
+        'Transaction_History_SoloParent' => ['ID','Transaction_ID'],
+        'Business_Day' => ['PERIOD_ID','POS_ID'],
+        'turnovercashiermophistory' => ['BRANCH_ID','OUTLETID','DATE','SHIFT','EMPNO','POSNUMBER','MOP_ID'],
+        'Periods' => ['Period_ID','POS_ID','Branch_ID'],
+        'CashDraw_Denomination' => ['ID'],
+        'Cashier_History' => ['Cashier_ID','Period_ID','POS_ID'],
+        'DailySummary' => ['STATIONCODE','DATE'],
+        'Days' => ['DATE'],
+        'Departments' => ['Department_ID'],
+        'DiscountSummary' => ['BRANCHID','OUTLETID','POSNUMBER','DATE','EMPNO','SHIFT','DISCOUNTID','RESETID'],
+        'Eod_Reports' => ['POS_ID','PERIOD_ID'],
+        'OutletStockStatusFilter' => ['BRANCHID'],
+        'Finalisation_History' => ['MOP_ID','PERIOD_ID'],
+        'stockcrd' => ['BRANCHID','STOCKCRDID','OUTLETID','POSNUMBER'],
+        'Synctable' => ['TABLENAME'],
+       
+        
+    
+
     ],
 
     /*
